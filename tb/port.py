@@ -277,6 +277,9 @@ def plan_apt(cmd, env=None):
         if p in PKG_NATIVE_NAME and PKG_NATIVE_NAME[p] is None:
             missing.append(p)
             continue
+        if plat == "win32" and p == "yq":
+            todo.append(shlex.quote(sys.executable) + " -m pip install yq")
+            continue
         if plat == "win32" and p == "sqlite3":
             todo.append("choco install sqlite --yes --no-progress")
             continue
