@@ -222,7 +222,7 @@ elif a.arm == "agent":
     key = os.environ.get("ENVSHIFT_API_KEY", "")
     if not key:
         finish(0, "?", "-", "nokey", "没有 ENVSHIFT_API_KEY，agent 跑不了")
-    r = subprocess.run([sys.executable, str(dsh / "drive_dsh.py"), str(cwd), a.model,
+    r = subprocess.run([sys.executable, str(HERE / "drive_terminal.py"), str(cwd), a.model,
                         a.base, key, str(out), str(pf)],
                        env=aenv, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=a.timeout + 600)
@@ -231,7 +231,11 @@ elif a.arm == "agent":
     log.append({"agent_rc": r.returncode, "题面字数": len(instruction)})
     answer_network("check")
     answer_network("off")
-    if r.returncode != 0:
+    state_file = out / "driver_state.json"
+    driver_state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    budget_exhausted = driver_state.get("status") == "budget_timeout" and driver_state.get("model_events", 0) > 0
+    log.append({"driver_state": driver_state})
+    if r.returncode != 0 and not budget_exhausted:
         (out / "port.log").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
         finish(0, "?", r.returncode, "agenterror", "driver_failed_requires_trace_review")
     # Preserve the delivered files before official tests can mutate them.
