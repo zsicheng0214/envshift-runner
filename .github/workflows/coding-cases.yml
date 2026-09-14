@@ -10,6 +10,8 @@ on:
         type: choice
         options: [controls, agent]
         default: controls
+      bundle_secret:
+        default: CODING_TASKS_B64_1
       bundle_sha256:
         required: true
       model:
@@ -37,7 +39,7 @@ jobs:
       - name: Restore private coding bundle with exact digest
         shell: python
         env:
-          BUNDLE: ${{ secrets.CODING_TASKS_B64_1 }}
+          BUNDLE: ${{ secrets[inputs.bundle_secret] }}
           BUNDLE2: ${{ secrets.CODING_TASKS_B64_2 }}
           EXPECTED: ${{ inputs.bundle_sha256 }}
         run: |
