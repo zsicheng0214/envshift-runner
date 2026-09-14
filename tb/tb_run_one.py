@@ -163,6 +163,16 @@ if a.arm == "gold":
                 "err": p.stderr.decode("utf-8", "replace")[-800:]})
 
 elif a.arm == "agent":
+    def check_answer_network():
+        if os.environ.get("TB_NETWORK_REQUIRED") != "1":
+            return
+        check = subprocess.run([sys.executable, str(HERE / "answer_network.py"), "check",
+                                "--backup", str(pathlib.Path(os.environ["RUNNER_TEMP"]) / "tb-hosts.backup")],
+                               capture_output=True, text=True)
+        log.append({"answer_network_check_rc": check.returncode})
+        if check.returncode:
+            finish(0, "?", check.returncode, "networkguard", "answer_network_not_blocked")
+    check_answer_network()
     # ★开跑前把「答案」从这台机器上抹掉：agent 有 shell，能翻到仓库里的
     #   solution.sh 与 tests/。判据先读进内存，再把题库目录与 .git 删掉。
     #   有先例：早先两条结果因 agent 读了判据与参考解而作废。
@@ -219,6 +229,7 @@ elif a.arm == "agent":
     if r.returncode != 0:
         (out / "port.log").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
         finish(0, "?", r.returncode, "agenterror", "driver_failed_requires_trace_review")
+    check_answer_network()
     # Preserve the delivered files before official tests can mutate them.
     shutil.make_archive(str(out / "delivered"), "gztar", root_dir=str(cwd))
 
