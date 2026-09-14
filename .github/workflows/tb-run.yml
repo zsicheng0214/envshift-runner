@@ -106,8 +106,7 @@ jobs:
           D="_out/${{ matrix.task }}-${{ inputs.arm }}"
           echo "---- 判据逐条 ----"
           grep -aE "PASSED|FAILED|ERROR" "$D/pytest.log" 2>/dev/null | sed 's|.*test_outputs.py::||' || echo "(无)"
-          echo "---- 日志尾部 ----"
-          tail -c 1500 "$D/driver.log" 2>/dev/null || tail -c 1500 "$D/port.log" 2>/dev/null || echo "(无)"
+          echo "Full driver and port diagnostics are in the encrypted artifact."
 
       - name: Encrypt full Terminal evidence
         if: always()
