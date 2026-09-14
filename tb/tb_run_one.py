@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -243,19 +244,20 @@ log.append({"判据里被重映射的文件": changed})
 
 env2 = dict(env)
 env2["PYTHONDONTWRITEBYTECODE"] = "1"
-p = subprocess.run([sys.executable, "-m", "pytest", str(tdir / "test_outputs.py"), "-rA", "-q"],
+p = subprocess.run([sys.executable, "-m", "pytest", str(tdir / "test_outputs.py"), "-rA", "-q", "--junitxml", str(out / "pytest.xml")],
                    cwd=str(cwd), env=env2, capture_output=True, timeout=a.timeout)
 txt = (p.stdout.decode("utf-8", "replace") + p.stderr.decode("utf-8", "replace"))
 (out / "pytest.log").write_text(txt, encoding="utf-8")
 (out / "port.log").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
-m = re.search(r"(\d+) passed", txt)
-f = re.search(r"(\d+) failed", txt)
-e = re.search(r"(\d+) error", txt)
-npass = int(m.group(1)) if m else 0
-nfail = int(f.group(1)) if f else 0
-nerr = int(e.group(1)) if e else 0
-total = npass + nfail + nerr
-if total == 0:
-    finish(0, 0, p.returncode, "ok", "pytest 没收集到用例")
+try:
+    report = ET.parse(out / "pytest.xml").getroot()
+    cases = list(report.iter("testcase"))
+    total = len(cases)
+    nerr = sum(c.find("error") is not None for c in cases)
+    npass = sum(all(c.find(tag) is None for tag in ("failure", "error", "skipped")) for c in cases)
+except (OSError, ET.ParseError) as e:
+    finish(0, 0, p.returncode, "gradererror", "missing_or_invalid_junit")
+if total == 0 or nerr or p.returncode not in (0, 1):
+    finish(npass, total, p.returncode, "gradererror", "pytest_collection_or_execution_error")
 finish(npass, total, p.returncode, "ok")
