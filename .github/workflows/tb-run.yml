@@ -25,6 +25,9 @@ on:
       tb_ref:
         description: "Pinned upstream Terminal-Bench commit"
         default: "d28711d0da2675d0bb1d56de45ae5df6082438a3"
+      repeats:
+        description: "Independent repetition labels as JSON"
+        default: "[1]"
       parallel:
         description: "并发上限（网关按 key 限流）"
         default: "4"
@@ -36,6 +39,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.oslist) }}
         task: ${{ fromJSON(inputs.tasks) }}
+        repeat: ${{ fromJSON(inputs.repeats) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -98,7 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: tb-${{ matrix.task }}-${{ matrix.os }}-${{ inputs.arm }}-${{ github.run_id }}
+          name: tb-${{ matrix.task }}-${{ matrix.os }}-${{ inputs.arm }}-r${{ matrix.repeat }}-${{ github.run_id }}
           path: tb-evidence.enc
           if-no-files-found: error
           retention-days: 14
