@@ -68,6 +68,15 @@ jobs:
         working-directory: dsh
         env: { NODE_OPTIONS: --max-old-space-size=4096 }
         run: npm ci --no-audit --no-fund 2>&1 | tail -2
+      - name: Block benchmark answer hosts
+        if: inputs.arm == 'agent'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python tb/answer_network.py on --backup "$RUNNER_TEMP/tb-hosts.backup"
+          else
+            sudo "$(command -v python)" tb/answer_network.py on --backup "$RUNNER_TEMP/tb-hosts.backup"
+          fi
       - name: 跑一格
         shell: bash
         working-directory: tb
@@ -76,9 +85,24 @@ jobs:
           ENVSHIFT_API_KEY: ${{ secrets.ENVSHIFT_API_KEY }}
           DSH_MAX_TOKENS: "131072"
           DSH_DIR: ${{ github.workspace }}/dsh
+          TB_NETWORK_REQUIRED: "1"
+          ENVSHIFT_PASSTHROUGH: DSH_SYSTEM_PROMPT
+          DSH_SYSTEM_PROMPT: >-
+            You are a coding agent. Solve the task using the provided inputs.
+            Do not access reference answers or hidden grader files, locally or over the network.
+            Do not alter evaluation infrastructure or network restrictions.
         run: |
           python tb_run_one.py --task "${{ matrix.task }}" --arm "${{ inputs.arm }}" \
             --model "${{ inputs.model }}" --timeout ${{ inputs.timeout }} || true
+      - name: Restore network after agent
+        if: always() && inputs.arm == 'agent'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python tb/answer_network.py off --backup "$RUNNER_TEMP/tb-hosts.backup"
+          else
+            sudo "$(command -v python)" tb/answer_network.py off --backup "$RUNNER_TEMP/tb-hosts.backup"
+          fi
       - name: 明细
         if: always()
         shell: bash
