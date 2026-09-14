@@ -1,0 +1,97 @@
+name: coding-cases
+on:
+  workflow_dispatch:
+    inputs:
+      oslist:
+        default: '["ubuntu-24.04","macos-15","windows-2022"]'
+      tasks:
+        default: '["C01-atomic-publish","C02-case-rename"]'
+      arm:
+        type: choice
+        options: [controls, agent]
+        default: controls
+      bundle_sha256:
+        required: true
+      model:
+        default: deepseek-v4.1-flash
+      timeout:
+        default: '900'
+jobs:
+  run:
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        os: ${{ fromJSON(inputs.oslist) }}
+        task: ${{ fromJSON(inputs.tasks) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.17.0'
+      - name: Restore private coding bundle with exact digest
+        shell: python
+        env:
+          BUNDLE: ${{ secrets.CODING_TASKS_B64_1 }}
+          BUNDLE2: ${{ secrets.CODING_TASKS_B64_2 }}
+          EXPECTED: ${{ inputs.bundle_sha256 }}
+        run: |
+          import base64, hashlib, io, os, pathlib, tarfile
+          raw = base64.b64decode(os.environ['BUNDLE'] + os.environ['BUNDLE2'], validate=True)
+          digest = hashlib.sha256(raw).hexdigest()
+          if digest != os.environ['EXPECTED']:
+              raise SystemExit('Bundle digest mismatch')
+          root = pathlib.Path('coding-private').resolve()
+          root.mkdir()
+          with tarfile.open(fileobj=io.BytesIO(raw), mode='r:gz') as tf:
+              for member in tf.getmembers():
+                  target = (root / member.name).resolve()
+                  if root not in target.parents or not (member.isfile() or member.isdir()):
+                      raise SystemExit('Unsafe bundle member')
+              tf.extractall(root)
+          print('bundle_sha256=' + digest)
+      - name: Install pinned agent runtime
+        if: inputs.arm == 'agent'
+        shell: bash
+        working-directory: dsh
+        run: npm ci --no-audit --no-fund > ../npm-private.log 2>&1
+      - name: Run isolated case
+        shell: python
+        env:
+          CASE_TASK: ${{ matrix.task }}
+          CASE_ARM: ${{ inputs.arm }}
+          CASE_MODEL: ${{ inputs.model }}
+          CASE_TIMEOUT: ${{ inputs.timeout }}
+          ENVSHIFT_API_KEY: ${{ secrets.ENVSHIFT_API_KEY }}
+          DSH_MAX_TOKENS: '131072'
+        run: |
+          import os, subprocess, sys
+          subprocess.run([sys.executable, 'coding-private/run_case.py'], check=True)
+      - name: Encrypt evidence
+        if: always()
+        shell: python
+        env:
+          EVIDENCE_PASS: ${{ secrets.TB_ARTIFACT_PASS }}
+        run: |
+          import os, pathlib, subprocess, tarfile
+          if not os.environ.get('EVIDENCE_PASS'):
+              raise SystemExit('Missing artifact password')
+          if not pathlib.Path('coding-out').exists():
+              raise SystemExit('No result; setup failure')
+          with tarfile.open('coding-out.tgz', 'w:gz') as tf:
+              tf.add('coding-out', arcname='coding-out')
+          try:
+              subprocess.run(['openssl', 'enc', '-aes-256-cbc', '-pbkdf2', '-salt', '-pass', 'env:EVIDENCE_PASS', '-in', 'coding-out.tgz', '-out', 'coding-out.enc'], check=True)
+          finally:
+              pathlib.Path('coding-out.tgz').unlink(missing_ok=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coding-${{ matrix.task }}-${{ matrix.os }}-${{ inputs.arm }}-${{ github.run_id }}
+          path: coding-out.enc
+          if-no-files-found: error
