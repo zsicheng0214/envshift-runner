@@ -41,7 +41,7 @@ jobs:
         task: ${{ fromJSON(inputs.tasks) }}
         repeat: ${{ fromJSON(inputs.repeats) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,8 +83,12 @@ jobs:
             Do not access reference answers or hidden grader files, locally or over the network.
             Do not alter evaluation infrastructure or network restrictions.
         run: |
-          python tb_run_one.py --task "${{ matrix.task }}" --arm "${{ inputs.arm }}" \
-            --model "${{ inputs.model }}" --timeout ${{ inputs.timeout }} || true
+          if [ "${{ inputs.arm }}" = "wal-probe" ]; then
+            python wal_probe.py
+          else
+            python tb_run_one.py --task "${{ matrix.task }}" --arm "${{ inputs.arm }}" \
+              --model "${{ inputs.model }}" --timeout ${{ inputs.timeout }} || true
+          fi
       - name: Restore network after agent
         if: always() && inputs.arm == 'agent'
         shell: bash
