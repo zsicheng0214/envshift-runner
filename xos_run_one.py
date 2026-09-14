@@ -83,7 +83,12 @@ ap.add_argument("--base", default="https://api.llmgateway.io/v1"); ap.add_argume
 ap.add_argument("--timeout", type=int, default=3600); ap.add_argument("--sudo-verify", action="store_true")
 a = ap.parse_args()
 here = pathlib.Path(__file__).resolve().parent; td = here / "tasks" / a.task
-binname, venv = BIN[a.task]; data, app = pathlib.Path(a.data), pathlib.Path(a.app)
+_sp = td / "task.json"
+if _sp.exists():
+    _s = json.loads(_sp.read_text(encoding="utf-8")); binname, venv = _s["tool"], _s["venv"]
+else:
+    binname, venv = BIN[a.task]      # 老题兜底
+ data, app = pathlib.Path(a.data), pathlib.Path(a.app)
 if os.name == "nt" and a.task in ("E7-publish-shared", "E12-publish-extend"):
     print(f"{a.task} cell={os.environ.get('XOS_CELL','?')} arm={a.arm} reward=NA 诊断=NA (Windows 无 POSIX 权限模型:坐标无定义)"); sys.exit(0)
 out = pathlib.Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
