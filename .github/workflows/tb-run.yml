@@ -93,12 +93,12 @@ jobs:
           TB_ARTIFACT_PASS: ${{ secrets.TB_ARTIFACT_PASS }}
         run: |
           test -n "$TB_ARTIFACT_PASS"
-          tar -czf "$RUNNER_TEMP/tb-evidence.tgz" -C tb _out
-          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:TB_ARTIFACT_PASS -in "$RUNNER_TEMP/tb-evidence.tgz" -out "$RUNNER_TEMP/tb-evidence.enc"
+          python -c "import shutil; shutil.make_archive('tb-evidence', 'gztar', 'tb', '_out')"
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:TB_ARTIFACT_PASS -in tb-evidence.tar.gz -out tb-evidence.enc
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: tb-${{ matrix.task }}-${{ matrix.os }}-${{ inputs.arm }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/tb-evidence.enc
+          path: tb-evidence.enc
           if-no-files-found: error
           retention-days: 14
