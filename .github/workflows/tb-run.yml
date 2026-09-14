@@ -1,0 +1,104 @@
+name: tb-run
+# Terminal-Bench 的题在三台**宿主机原生**跑，用 TB 官方判据打分。
+#
+# ★题目数据不进本仓：工作流运行时从 laude-institute/terminal-bench 现拉。
+#   两个理由——不二次发布带 canary 的基准数据；本仓是公开仓，Actions 分钟数免费
+#   （私有仓计费，mac 按 10 倍、Windows 按 2 倍，跑几轮就烧穿了）。
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "题名 JSON 数组"
+        default: '["flood-monitoring-basic","jsonl-aggregator","log-summary","merge-diff-arc-agi-task","multi-source-data-merger"]'
+      oslist:
+        description: "runner 列表"
+        default: '["ubuntu-24.04","macos-15","windows-2022"]'
+      arm:
+        description: "gold / agent / none"
+        default: "gold"
+      model:
+        description: "模型名（arm=agent 时用）"
+        default: "deepseek-v4.1-flash"
+      timeout:
+        description: "agent 秒数"
+        default: "1800"
+      tb_ref:
+        description: "Pinned upstream Terminal-Bench commit"
+        default: "d28711d0da2675d0bb1d56de45ae5df6082438a3"
+      parallel:
+        description: "并发上限（网关按 key 限流）"
+        default: "4"
+jobs:
+  run:
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.parallel) }}
+      matrix:
+        os: ${{ fromJSON(inputs.oslist) }}
+        task: ${{ fromJSON(inputs.tasks) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22.17.0' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: 拉 Terminal-Bench 题库（不进本仓）
+        shell: bash
+        run: |
+          git clone -q --depth 1 https://github.com/laude-institute/terminal-bench.git "$RUNNER_TEMP/tbench"
+          git -C "$RUNNER_TEMP/tbench" fetch -q --depth 1 origin "${{ inputs.tb_ref }}"
+          git -C "$RUNNER_TEMP/tbench" checkout -q --detach FETCH_HEAD
+          git -C "$RUNNER_TEMP/tbench" rev-parse HEAD
+          echo "TB_TASKS=$RUNNER_TEMP/tbench/original-tasks" >> "$GITHUB_ENV"
+          ls "$RUNNER_TEMP/tbench/original-tasks" | wc -l
+      - name: 装 pytest 与 uv
+        shell: bash
+        run: |
+          python -m pip install -q pytest==8.4.1
+          python -m pip install -q uv || true
+      - name: 装 DSH（只有 agent 臂要）
+        if: inputs.arm == 'agent'
+        shell: bash
+        working-directory: dsh
+        env: { NODE_OPTIONS: --max-old-space-size=4096 }
+        run: npm ci --no-audit --no-fund 2>&1 | tail -2
+      - name: 跑一格
+        shell: bash
+        working-directory: tb
+        env:
+          XOS_CELL: ${{ matrix.os }}
+          ENVSHIFT_API_KEY: ${{ secrets.ENVSHIFT_API_KEY }}
+          DSH_MAX_TOKENS: "131072"
+          DSH_DIR: ${{ github.workspace }}/dsh
+        run: |
+          python tb_run_one.py --task "${{ matrix.task }}" --arm "${{ inputs.arm }}" \
+            --model "${{ inputs.model }}" --timeout ${{ inputs.timeout }} || true
+      - name: 明细
+        if: always()
+        shell: bash
+        working-directory: tb
+        run: |
+          D="_out/${{ matrix.task }}-${{ inputs.arm }}"
+          echo "---- 判据逐条 ----"
+          grep -aE "PASSED|FAILED|ERROR" "$D/pytest.log" 2>/dev/null | sed 's|.*test_outputs.py::||' || echo "(无)"
+          echo "---- 日志尾部 ----"
+          tail -c 1500 "$D/driver.log" 2>/dev/null || tail -c 1500 "$D/port.log" 2>/dev/null || echo "(无)"
+
+      - name: Encrypt full Terminal evidence
+        if: always()
+        shell: bash
+        env:
+          TB_ARTIFACT_PASS: ${{ secrets.TB_ARTIFACT_PASS }}
+        run: |
+          test -n "$TB_ARTIFACT_PASS"
+          tar -czf "$RUNNER_TEMP/tb-evidence.tgz" -C tb _out
+          openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:TB_ARTIFACT_PASS -in "$RUNNER_TEMP/tb-evidence.tgz" -out "$RUNNER_TEMP/tb-evidence.enc"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tb-${{ matrix.task }}-${{ matrix.os }}-${{ inputs.arm }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/tb-evidence.enc
+          if-no-files-found: error
+          retention-days: 14
