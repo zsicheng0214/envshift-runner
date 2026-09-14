@@ -33,4 +33,4 @@ version = subprocess.run(['sqlite3', '--version'], env=env, capture_output=True,
 result = {'cell': os.environ.get('XOS_CELL'), 'platform': platform.platform(), 'sqlite': version, 'observations': rows}
 (out / 'probe.json').write_text(json.dumps(result, indent=2), encoding="utf-8")
 (out / 'port.log').write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
-print('WAL_PROBE ' + json.dumps(result))
+print('WAL_PROBE ' + json.dumps({'cell': result['cell'], 'sqlite': version, 'observations': [{k: row[k] for k in ('mode', 'rc', 'wal_exists_after', 'wal_sha256_before', 'wal_sha256_after')} for row in rows]}))
