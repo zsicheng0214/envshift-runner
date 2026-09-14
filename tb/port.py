@@ -63,6 +63,11 @@ def remap(text, root):
       路径分隔符、引号、空白或行尾。
     """
     out = text
+    if os.name == "nt":
+        # Resolve a quoted POSIX bash executable to the installed native Git bash.
+        # Keep the source quoting, including paths containing spaces.
+        out = re.sub(r"([\"'])/bin/bash\1",
+                     lambda m: m.group(1) + shell_path().replace(chr(92), "/") + m.group(1), out)
     for seg in sorted(MAPPED, key=len, reverse=True):
         repl = str(root / seg.lstrip("/")).replace(chr(92), "/")
         pat = r"(?<![A-Za-z0-9_.\-/])" + re.escape(seg) + r"(?=[/\s\"'\):;,]|$)"
@@ -177,7 +182,7 @@ def parse_dockerfile(path):
 def run_sh(cmd, cwd, env, log):
     """在宿主机上执行一条 RUN。Windows 上绝不用裸 bash（System32 那个是 WSL 入口）。"""
     sh = shell_path()
-    p = subprocess.run([sh, "-lc", cmd], cwd=str(cwd), env=env,
+    p = subprocess.run([sh, "-c", cmd], cwd=str(cwd), env=env,
                        capture_output=True, timeout=1800)
     log.append({"cmd": cmd[:400], "rc": p.returncode,
                 "out": p.stdout.decode("utf-8", "replace")[-600:],
@@ -230,7 +235,7 @@ def _plat():
 _HAVE = {}
 
 
-def have(cmd):
+def have(cmd, env=None):
     """这台机器上有没有这个命令。
 
     ★必须走「将来真跑 RUN 的那个 shell」去查,不能用 Python 的 shutil.which:
@@ -238,24 +243,24 @@ def have(cmd):
       于是 which 说没有 bc、bash 里明明有。探针与被测必须走同一条调用路径——
       这个坑在别处已经栽过一次,这里又栽了一次。
     """
-    if cmd in _HAVE:
-        return _HAVE[cmd]
+    key = (cmd, (env or os.environ).get("PATH", ""))
+    if key in _HAVE:
+        return _HAVE[key]
     try:
-        r = subprocess.run([shell_path(), "-lc", "command -v " + shlex.quote(cmd)],
-                           capture_output=True, timeout=60)
+        r = subprocess.run([shell_path(), "-c", "command -v " + shlex.quote(cmd)],
+                           capture_output=True, timeout=60, env=env)
         ok = r.returncode == 0 and bool(r.stdout.strip())
     except Exception:
         ok = False
-    _HAVE[cmd] = ok
+    _HAVE[key] = ok
     return ok
 
 
-def plan_apt(cmd):
+def plan_apt(cmd, env=None):
     """从一条 apt 命令里挑出包名，判断这台机器要不要装、装不装得上。"""
     pkgs = []
-    m = re.search(r"apt-get\s+(?:-y\s+)?install\s+(?:-y\s+)?(.*)", cmd)
-    if m:
-        for tok in shlex.split(m.group(1).split("&&")[0]):
+    for m in re.finditer(r"\bapt(?:-get)?\s+(?:-\S+\s+)*install\s+([^;&|]+)", cmd):
+        for tok in shlex.split(m.group(1)):
             if tok.startswith("-") or tok in ("apt-get", "install"):
                 continue
             pkgs.append(tok)
@@ -266,7 +271,7 @@ def plan_apt(cmd):
         if cmdname is None:                      # 声明为「与题目无关」
             already.append(p + "(无关)")
             continue
-        if have(cmdname):                        # ★按真跑 RUN 的那个 shell 来查
+        if have(cmdname, env):                        # ★按真跑 RUN 的那个 shell 来查
             already.append(p)
             continue
         if p in PKG_NATIVE_NAME and PKG_NATIVE_NAME[p] is None:
@@ -287,6 +292,11 @@ def materialize(task_dir, root, log):
     """按 Dockerfile 在宿主机上把题目环境搭出来。"""
     steps = parse_dockerfile(task_dir / "Dockerfile")
     env = dict(os.environ)
+    if os.name == "nt":
+        git_bin = pathlib.Path(shell_path()).parent
+        git_usr = git_bin.parent / "usr" / "bin"
+        env["PATH"] = os.pathsep.join([str(git_bin), str(git_usr), env.get("PATH", "")])
+        log.append({"native_bash_path": str(git_bin), "native_unix_tools": str(git_usr)})
     # Official TB base images inherit WORKDIR /app.
     base = next((step[1] for step in steps if step[0] == "FROM"), "")
     cwd = root / "app" if "ghcr.io/laude-institute/t-bench/" in base else root
@@ -321,7 +331,7 @@ def materialize(task_dir, root, log):
                 # 真的是多阶段构建产物才弃题。
                 toks = shlex.split(rest)[1:]
                 names = [pathlib.PurePosixPath(x).name for x in toks[:-1]]
-                if names and all(have(n) for n in names):
+                if names and all(have(n, env) for n in names):
                     log.append({"跳过 COPY --from(本机已有该工具)": names})
                     continue
                 raise Unsupported("COPY --from 多阶段，需要手工移植：%s" % names)
@@ -360,8 +370,8 @@ def materialize(task_dir, root, log):
             continue
         if head == "RUN":
             cmd = remap(rest, root)
-            if "apt-get" in cmd:
-                pkgs, todo, missing, already = plan_apt(cmd)
+            if re.search(r"\bapt(?:-get)?\s", cmd):
+                pkgs, todo, missing, already = plan_apt(cmd, env)
                 log.append({"apt": pkgs, "这台已有": already,
                             "这台要装": todo, "这台确实没有": missing})
                 if missing:
@@ -384,7 +394,7 @@ def materialize(task_dir, root, log):
                 # 没有这套但也不需要。跳过即可，不必整道弃掉。
                 log.append({"跳过 Linux 专属的 locale 步骤": cmd.strip()[:60]})
                 continue
-            if head0 == "mandb" and not have("mandb"):
+            if head0 == "mandb" and not have("mandb", env):
                 raise Unsupported("这台没有 mandb：%s" % cmd.strip()[:40])
             rc = run_sh(cmd, cwd, env, log)
             if rc != 0:
