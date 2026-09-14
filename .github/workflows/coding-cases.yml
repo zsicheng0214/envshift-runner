@@ -11,7 +11,7 @@ on:
         options: [controls, agent]
         default: controls
       bundle_secret:
-        default: CODING_TASKS_B64_1
+        default: CODING_TASKS_B64_PATCHED
       bundle_sha256:
         required: true
       model:
