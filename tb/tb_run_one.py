@@ -216,6 +216,11 @@ elif a.arm == "agent":
     (out / "driver.log").write_text((r.stdout or "") + (r.stderr or ""), encoding="utf-8")
     pf.unlink(missing_ok=True)
     log.append({"agent_rc": r.returncode, "题面字数": len(instruction)})
+    if r.returncode != 0:
+        (out / "port.log").write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+        finish(0, "?", r.returncode, "agenterror", "driver_failed_requires_trace_review")
+    # Preserve the delivered files before official tests can mutate them.
+    shutil.make_archive(str(out / "delivered"), "gztar", root_dir=str(cwd))
 
     # 判据从内存里解出来，不再依赖已被抹掉的题库目录
     tdir_src = out / "_tests_src"
