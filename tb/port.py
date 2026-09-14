@@ -272,6 +272,9 @@ def plan_apt(cmd):
         if p in PKG_NATIVE_NAME and PKG_NATIVE_NAME[p] is None:
             missing.append(p)
             continue
+        if plat == "win32" and p == "sqlite3":
+            todo.append("choco install sqlite --yes --no-progress")
+            continue
         recipe = INSTALLER.get(plat)
         if not recipe:
             missing.append(p)
@@ -364,7 +367,8 @@ def materialize(task_dir, root, log):
                 if missing:
                     raise Unsupported("这台机器没有等价物：%s" % missing)
                 for t in todo:
-                    run_sh(t, cwd, env, log)
+                    if run_sh(t, cwd, env, log) != 0:
+                        raise Unsupported("依赖安装失败：%s" % t)
                 continue
             # ★pip 一律走「当前解释器 -m pip」:PATH 上的 pip 可能指着另一个
             # 甚至坏掉的解释器(本机 mac 上就指着已不存在的 Python 2.7)。
