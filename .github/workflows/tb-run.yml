@@ -68,15 +68,6 @@ jobs:
         working-directory: dsh
         env: { NODE_OPTIONS: --max-old-space-size=4096 }
         run: npm ci --no-audit --no-fund 2>&1 | tail -2
-      - name: Block benchmark answer hosts
-        if: inputs.arm == 'agent'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            python tb/answer_network.py on --backup "$RUNNER_TEMP/tb-hosts.backup"
-          else
-            sudo "$(command -v python)" tb/answer_network.py on --backup "$RUNNER_TEMP/tb-hosts.backup"
-          fi
       - name: 跑一格
         shell: bash
         working-directory: tb
