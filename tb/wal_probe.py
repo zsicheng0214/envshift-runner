@@ -31,6 +31,6 @@ for mode in ['ro', 'rw']:
                  'stdout': p.stdout, 'stderr': p.stderr})
 version = subprocess.run(['sqlite3', '--version'], env=env, capture_output=True, text=True, check=True).stdout.strip()
 result = {'cell': os.environ.get('XOS_CELL'), 'platform': platform.platform(), 'sqlite': version, 'observations': rows}
-(out / 'probe.json').write_text(json.dumps(result, indent=2))
-(out / 'port.log').write_text(json.dumps(log, ensure_ascii=False, indent=2))
+(out / 'probe.json').write_text(json.dumps(result, indent=2), encoding="utf-8")
+(out / 'port.log').write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 print('WAL_PROBE ' + json.dumps(result))
